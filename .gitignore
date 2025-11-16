@@ -29,6 +29,8 @@ go.work.sum
 .mod
 .sum
 node_modules/
+package-lock.json
+package.json
 
 # Editor/IDE
 # .idea/
