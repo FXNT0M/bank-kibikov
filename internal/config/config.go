@@ -2,38 +2,25 @@ package config
 
 import (
 	"os"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Server struct {
-		Port string `yaml:"port"`
-	} `yaml:"server"`
-
-	Database struct {
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		DBName   string `yaml:"dbname"`
-		SSLMode  string `yaml:"sslmode"`
-	} `yaml:"database"`
+	Port        string
+	DatabaseURL string
+	JWTSecret   string
 }
 
-func LoadConfig(path string) (*Config, error) {
-	config := &Config{}
-
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
+func Load() *Config {
+	return &Config{
+		Port:        getEnv("PORT", "8080"),
+		DatabaseURL: getEnv("DATABASE_URL", "postgres://kibikov_user:kibikov_password@localhost:5432/bank_kibikov?sslmode=disable"),
+		JWTSecret:   getEnv("JWT_SECRET", "your-super-secret-jwt-key"),
 	}
-	defer file.Close()
+}
 
-	decoder := yaml.NewDecoder(file)
-	if err := decoder.Decode(config); err != nil {
-		return nil, err
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
-
-	return config, nil
+	return defaultValue
 }

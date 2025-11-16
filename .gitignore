@@ -28,6 +28,8 @@ go.work.sum
 .env
 .mod
 .sum
+node_modules/
+
 # Editor/IDE
 # .idea/
 # .vscode/

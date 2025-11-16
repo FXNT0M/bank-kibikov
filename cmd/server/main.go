@@ -2,105 +2,92 @@ package main
 
 import (
 	"bank-kibikov/internal/config"
-	"bank-kibikov/internal/handlers"
-	"bank-kibikov/internal/repository"
+	"bank-kibikov/internal/handler"
+	"bank-kibikov/internal/middleware"
+	"bank-kibikov/internal/repository/postgres"
+	"bank-kibikov/internal/service"
 	"bank-kibikov/pkg/database"
+	"bank-kibikov/pkg/jwt"
 	"log"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	// Загрузка конфигурации
-	cfg, err := config.LoadConfig("config.yaml")
-	if err != nil {
-		log.Fatal("Failed to load config:", err)
-	}
+	// Load config
+	cfg := config.Load()
 
-	// Подключение к PostgreSQL
-	db, err := database.NewPostgresDB(cfg)
+	// Initialize database
+	db, err := database.NewPostgresConnection(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
-	defer db.Close()
 
-	// Инициализация репозиториев
-	userRepo := repository.NewUserRepository(db)
-	transRepo := repository.NewTransactionRepository(db)
-	taskRepo := repository.NewTaskRepository(db)
+	// Run migrations
+	if err := database.RunMigrations(cfg.DatabaseURL); err != nil {
+		log.Fatal("Failed to run migrations:", err)
+	}
 
-	// Инициализация обработчиков
-	userHandler := handlers.NewUserHandler(userRepo, transRepo, taskRepo)
-	transactionHandler := handlers.NewTransactionHandler(userRepo, transRepo)
-	taskHandler := handlers.NewTaskHandler(userRepo, taskRepo, transRepo)
+	// Initialize JWT
+	jwtManager := jwt.NewJWTManager(cfg.JWTSecret)
 
-	// Настройка маршрутов
+	// Initialize repositories
+	userRepo := postgres.NewUserRepository(db)
+	transactionRepo := postgres.NewTransactionRepository(db)
+	taskRepo := postgres.NewTaskRepository(db)
+
+	// Initialize services
+	authService := service.NewAuthService(userRepo, jwtManager)
+	userService := service.NewUserService(userRepo)
+	transactionService := service.NewTransactionService(transactionRepo, userRepo)
+	taskService := service.NewTaskService(taskRepo, userRepo, transactionRepo)
+
+	// Initialize handlers
+	authHandler := handler.NewAuthHandler(authService)
+	userHandler := handler.NewUserHandler(userService)
+	transactionHandler := handler.NewTransactionHandler(transactionService)
+	taskHandler := handler.NewTaskHandler(taskService)
+
+	// Setup router
 	router := gin.Default()
 
-	// CORS middleware
-	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	// CORS middleware - ИСПРАВЛЕННАЯ КОНФИГУРАЦИЯ
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8080"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+	}))
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
+	// ИЛИ используйте упрощенную версию:
+	// router.Use(cors.Default())
 
-		c.Next()
-	})
-
-	// Обслуживание статических файлов фронтенда
-	router.Static("/static", "./static")
-	router.StaticFile("/", "./static/index.html")
-	router.StaticFile("/index.html", "./static/index.html")
-
-	// API маршруты
-	api := router.Group("/api")
+	// API routes
+	api := router.Group("/api/v1")
 	{
-		// Пользователи
-		users := api.Group("/users")
+		// Public routes
+		auth := api.Group("/auth")
 		{
-			users.POST("/register", userHandler.Register)
-			users.POST("/login", userHandler.Login)
-			users.GET("/:cipher", userHandler.GetUserData)
-			users.GET("/", userHandler.GetAllUsers)
+			auth.POST("/register", authHandler.Register)
+			auth.POST("/login", authHandler.Login)
 		}
 
-		// Переводы
-		transfers := api.Group("/transfers")
+		// Protected routes
+		protected := api.Group("/")
+		protected.Use(middleware.AuthMiddleware(jwtManager))
 		{
-			transfers.POST("/:cipher", transactionHandler.Transfer)
-		}
+			protected.GET("/user/profile", userHandler.GetProfile)
+			protected.GET("/user/transactions", userHandler.GetTransactions)
 
-		// Задания
-		tasks := api.Group("/tasks")
-		{
-			tasks.GET("/", taskHandler.GetTasks)
-			tasks.POST("/:cipher/complete/:taskId", taskHandler.CompleteTask)
+			protected.POST("/transactions/transfer", transactionHandler.MakeTransfer)
+
+			protected.GET("/tasks", taskHandler.GetTasks)
+			protected.POST("/tasks/:id/complete", taskHandler.CompleteTask)
 		}
 	}
 
-	// Health check
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status":   "OK",
-			"service":  "Bank Kibikov API",
-			"database": "PostgreSQL",
-		})
-	})
-
-	// Fallback для SPA
-	router.NoRoute(func(c *gin.Context) {
-		c.File("./static/index.html")
-	})
-
-	log.Printf("🚀 Server starting on port %s", cfg.Server.Port)
-	log.Printf("📊 Database: PostgreSQL")
-	log.Printf("🌐 Frontend available at: http://localhost%s", cfg.Server.Port)
-
-	if err := router.Run(cfg.Server.Port); err != nil {
-		log.Fatal("Failed to start server:", err)
-	}
+	log.Printf("Server starting on port %s", cfg.Port)
+	log.Fatal(router.Run(":" + cfg.Port))
 }

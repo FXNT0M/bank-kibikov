@@ -1,6 +1,24 @@
-const API_BASE = '/api';
-
 let currentUser = null;
+let authToken = null;
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    checkAuthStatus();
+    updateRecipientsList();
+});
+
+// Проверка статуса авторизации
+function checkAuthStatus() {
+    const token = localStorage.getItem('token');
+    const user = localStorage.getItem('user');
+    
+    if (token && user) {
+        authToken = token;
+        currentUser = JSON.parse(user);
+        showMainSection();
+        loadUserData();
+    }
+}
 
 // Управление табами авторизации
 function showTab(tabName) {
@@ -24,29 +42,29 @@ async function register() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/users/register`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ cipher, password, name, group })
+        const result = await window.electronAPI.register({
+            cipher, password, name, group
         });
-
-        const result = await response.json();
         
-        if (result.success) {
+        if (result.token && result.user) {
+            // Сохраняем токен и данные пользователя
+            localStorage.setItem('token', result.token);
+            localStorage.setItem('user', JSON.stringify(result.user));
+            authToken = result.token;
+            currentUser = result.user;
+            
             showMessage(result.message, 'success');
-            showTab('login');
-            // Очищаем поля
+            showMainSection();
+            loadUserData();
+            
+            // Очищаем форму
             document.getElementById('reg-cipher').value = '';
             document.getElementById('reg-password').value = '';
             document.getElementById('reg-name').value = '';
             document.getElementById('reg-group').value = '';
-        } else {
-            showMessage(result.error, 'error');
         }
     } catch (error) {
-        showMessage('Ошибка регистрации: ' + error.message, 'error');
+        showMessage(error.message, 'error');
     }
 }
 
@@ -61,26 +79,20 @@ async function login() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/users/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ cipher, password })
-        });
-
-        const result = await response.json();
+        const result = await window.electronAPI.login(cipher, password);
         
-        if (result.success) {
+        if (result.token && result.user) {
+            // Сохраняем токен и данные пользователя
+            localStorage.setItem('token', result.token);
+            localStorage.setItem('user', JSON.stringify(result.user));
+            authToken = result.token;
             currentUser = result.user;
+            
             showMainSection();
             loadUserData();
-            showMessage('Успешный вход!', 'success');
-        } else {
-            showMessage(result.error, 'error');
         }
     } catch (error) {
-        showMessage('Ошибка входа: ' + error.message, 'error');
+        showMessage(error.message, 'error');
     }
 }
 
@@ -95,22 +107,26 @@ async function loadUserData() {
     if (!currentUser) return;
 
     try {
-        const response = await fetch(`${API_BASE}/users/${currentUser.cipher}`);
-        const data = await response.json();
+        const [profileData, transactionsData] = await Promise.all([
+            window.electronAPI.getUserProfile(),
+            window.electronAPI.getUserTransactions()
+        ]);
         
-        if (response.ok) {
-            document.getElementById('balance-amount').textContent = 
-                `${data.user.balance} Кибиков`;
-            document.getElementById('user-name').textContent = data.user.name;
-            
-            updateTransactionsList(data.transactions);
-            updateRecipientsList();
-            loadTasks();
-        } else {
-            showMessage(data.error, 'error');
-        }
+        // Обновляем данные пользователя
+        currentUser = { ...currentUser, ...profileData.user };
+        localStorage.setItem('user', JSON.stringify(currentUser));
+        
+        document.getElementById('balance-amount').textContent = 
+            `${currentUser.balance} Кибиков`;
+        document.getElementById('user-name').textContent = currentUser.name;
+        
+        updateTransactionsList(transactionsData.transactions);
+        loadTasks();
     } catch (error) {
-        showMessage('Ошибка загрузки данных: ' + error.message, 'error');
+        showMessage('Ошибка загрузки данных', 'error');
+        if (error.message.includes('авторизация')) {
+            logout();
+        }
     }
 }
 
@@ -133,11 +149,11 @@ function updateTransactionsList(transactions) {
     container.innerHTML = transactions.map(transaction => `
         <div class="transaction-item">
             <div class="transaction-info">
-                <div class="transaction-name">${transaction.recipient_name}</div>
+                <div class="transaction-name">${transaction.recipientName}</div>
                 <div class="transaction-date">${new Date(transaction.date).toLocaleDateString('ru-RU')}</div>
             </div>
-            <div class="transaction-amount ${transaction.to_cipher === currentUser.cipher ? 'positive' : 'negative'}">
-                ${transaction.to_cipher === currentUser.cipher ? '+' : '-'}${transaction.amount} К
+            <div class="transaction-amount ${transaction.toCipher === currentUser.cipher ? 'positive' : 'negative'}">
+                ${transaction.toCipher === currentUser.cipher ? '+' : '-'}${transaction.amount} К
             </div>
         </div>
     `).join('');
@@ -146,26 +162,23 @@ function updateTransactionsList(transactions) {
 // Обновление списка получателей
 async function updateRecipientsList() {
     const select = document.getElementById('transfer-recipient');
+    select.innerHTML = '<option value="">Выберите получателя</option>';
     
-    try {
-        const response = await fetch(`${API_BASE}/users`);
-        const users = await response.json();
-        
-        select.innerHTML = '<option value="">Выберите получателя</option>';
-        
-        // Фильтруем текущего пользователя
-        const otherUsers = users.filter(user => user.cipher !== currentUser.cipher);
-        
-        otherUsers.forEach(user => {
-            const option = document.createElement('option');
-            option.value = user.cipher;
-            option.textContent = `${user.name} (${user.group_name})`;
-            option.dataset.group = user.group_name;
-            select.appendChild(option);
-        });
-    } catch (error) {
-        showMessage('Ошибка загрузки пользователей: ' + error.message, 'error');
-    }
+    // Тестовые пользователи для демонстрации
+    const testUsers = [
+        { cipher: 'kkso07_001', name: 'Иван Петров (ККСО-07-23)', group: 'кксо-07-23' },
+        { cipher: 'kkso07_002', name: 'Мария Сидорова (ККСО-07-23)', group: 'кксо-07-23' },
+        { cipher: 'kkso06_001', name: 'Алексей Козлов (ККСО-06-23)', group: 'кксо-06-23' },
+        { cipher: 'kkso06_002', name: 'Елена Новикова (ККСО-06-23)', group: 'кксо-06-23' }
+    ];
+    
+    testUsers.forEach(user => {
+        const option = document.createElement('option');
+        option.value = user.cipher;
+        option.textContent = user.name;
+        option.dataset.group = user.group;
+        select.appendChild(option);
+    });
 }
 
 // Фильтрация получателей по группе
@@ -184,7 +197,7 @@ async function makeTransfer() {
     if (!currentUser) return;
 
     const toCipher = document.getElementById('transfer-recipient').value;
-    const amount = parseFloat(document.getElementById('transfer-amount').value);
+    const amount = parseInt(document.getElementById('transfer-amount').value);
     const recipientOption = document.getElementById('transfer-recipient').selectedOptions[0];
 
     if (!toCipher || !amount || amount <= 0) {
@@ -198,53 +211,42 @@ async function makeTransfer() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/transfers/${currentUser.cipher}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-                to_cipher: toCipher, 
-                amount: amount 
-            })
+        const result = await window.electronAPI.makeTransfer({
+            toCipher: toCipher,
+            amount: amount,
+            recipientName: recipientOption.textContent.split(' (')[0]
         });
-
-        const result = await response.json();
         
-        if (result.success) {
-            showMessage(result.message, 'success');
-            document.getElementById('transfer-amount').value = '';
-            // Обновляем баланс текущего пользователя
-            currentUser.balance = result.new_balance;
-            loadUserData();
-        } else {
-            showMessage(result.error, 'error');
-        }
+        showMessage(result.message, 'success');
+        document.getElementById('transfer-amount').value = '';
+        loadUserData(); // Обновляем данные
     } catch (error) {
-        showMessage('Ошибка перевода: ' + error.message, 'error');
+        showMessage(error.message, 'error');
     }
 }
 
 // Загрузка заданий
 async function loadTasks() {
     try {
-        const response = await fetch(`${API_BASE}/tasks`);
-        const tasks = await response.json();
-        
+        const result = await window.electronAPI.getTasks();
         const container = document.getElementById('tasks-container');
         
-        container.innerHTML = tasks.map(task => `
+        // Временная реализация - задания всегда не выполнены
+        // В реальном приложении нужно добавить проверку статуса выполнения
+        container.innerHTML = result.tasks.map(task => `
             <div class="task-item">
                 <div class="task-info">
                     <div class="task-title">${task.title}</div>
-                    <div class="task-status">${task.completed ? '✅ Выполнено' : '⏳ Доступно'}</div>
+                    <div class="task-status">⏳ Доступно</div>
                 </div>
                 <div class="task-reward">+${task.reward} К</div>
-                ${!task.completed ? `<button onclick="completeTask(${task.id})" class="btn-primary" style="padding: 5px 10px; font-size: 12px;">Выполнить</button>` : ''}
+                <button onclick="completeTask(${task.id})" class="btn-primary" style="margin-left: 10px; padding: 8px 16px;">
+                    Выполнить
+                </button>
             </div>
         `).join('');
     } catch (error) {
-        showMessage('Ошибка загрузки заданий: ' + error.message, 'error');
+        showMessage('Ошибка загрузки заданий', 'error');
     }
 }
 
@@ -253,23 +255,11 @@ async function completeTask(taskId) {
     if (!currentUser) return;
 
     try {
-        const response = await fetch(`${API_BASE}/tasks/${currentUser.cipher}/complete/${taskId}`, {
-            method: 'POST'
-        });
-
-        const result = await response.json();
-        
-        if (result.success) {
-            showMessage(result.message, 'success');
-            // Обновляем баланс
-            currentUser.balance = result.new_balance;
-            loadUserData();
-            loadTasks();
-        } else {
-            showMessage(result.error, 'error');
-        }
+        const result = await window.electronAPI.completeTask(taskId);
+        showMessage(result.message, 'success');
+        loadUserData(); // Обновляем баланс и задания
     } catch (error) {
-        showMessage('Ошибка выполнения задания: ' + error.message, 'error');
+        showMessage(error.message, 'error');
     }
 }
 
@@ -285,6 +275,10 @@ function showMainTab(tabName) {
 // Выход
 function logout() {
     currentUser = null;
+    authToken = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    
     document.getElementById('main-section').classList.remove('active');
     document.getElementById('auth-section').classList.add('active');
     
@@ -311,11 +305,3 @@ function showMessage(text, type) {
         }
     }, 3000);
 }
-
-// Инициализация при загрузке
-document.addEventListener('DOMContentLoaded', () => {
-    // Автоматически обновляем список получателей при загрузке
-    if (currentUser) {
-        updateRecipientsList();
-    }
-});
