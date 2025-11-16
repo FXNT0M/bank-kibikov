@@ -17,39 +17,89 @@ func main() {
 		log.Fatal("Failed to load config:", err)
 	}
 
-	// Подключение к базе данных
+	// Подключение к PostgreSQL
 	db, err := database.NewPostgresDB(cfg)
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
 	defer db.Close()
 
-	// Инициализация репозитория и обработчиков
-	accountRepo := repository.NewAccountRepository(db)
-	accountHandler := handlers.NewAccountHandler(accountRepo)
+	// Инициализация репозиториев
+	userRepo := repository.NewUserRepository(db)
+	transRepo := repository.NewTransactionRepository(db)
+	taskRepo := repository.NewTaskRepository(db)
+
+	// Инициализация обработчиков
+	userHandler := handlers.NewUserHandler(userRepo, transRepo, taskRepo)
+	transactionHandler := handlers.NewTransactionHandler(userRepo, transRepo)
+	taskHandler := handlers.NewTaskHandler(userRepo, taskRepo, transRepo)
 
 	// Настройка маршрутов
 	router := gin.Default()
 
-	// Группа маршрутов для работы со счетами
-	accounts := router.Group("/accounts")
+	// CORS middleware
+	router.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
+	// Обслуживание статических файлов фронтенда
+	router.Static("/static", "./static")
+	router.StaticFile("/", "./static/index.html")
+	router.StaticFile("/index.html", "./static/index.html")
+
+	// API маршруты
+	api := router.Group("/api")
 	{
-		accounts.POST("", accountHandler.CreateAccount)
-		accounts.GET("", accountHandler.GetAccounts)
-		accounts.GET("/:id", accountHandler.GetAccount)
-		accounts.PUT("/:id", accountHandler.UpdateAccount)
-		accounts.DELETE("/:id", accountHandler.DeleteAccount)
+		// Пользователи
+		users := api.Group("/users")
+		{
+			users.POST("/register", userHandler.Register)
+			users.POST("/login", userHandler.Login)
+			users.GET("/:cipher", userHandler.GetUserData)
+			users.GET("/", userHandler.GetAllUsers)
+		}
+
+		// Переводы
+		transfers := api.Group("/transfers")
+		{
+			transfers.POST("/:cipher", transactionHandler.Transfer)
+		}
+
+		// Задания
+		tasks := api.Group("/tasks")
+		{
+			tasks.GET("/", taskHandler.GetTasks)
+			tasks.POST("/:cipher/complete/:taskId", taskHandler.CompleteTask)
+		}
 	}
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"status":  "OK",
-			"service": "Bank Kibikov API",
+			"status":   "OK",
+			"service":  "Bank Kibikov API",
+			"database": "PostgreSQL",
 		})
 	})
 
-	log.Printf("Server starting on port %s", cfg.Server.Port)
+	// Fallback для SPA
+	router.NoRoute(func(c *gin.Context) {
+		c.File("./static/index.html")
+	})
+
+	log.Printf("🚀 Server starting on port %s", cfg.Server.Port)
+	log.Printf("📊 Database: PostgreSQL")
+	log.Printf("🌐 Frontend available at: http://localhost%s", cfg.Server.Port)
+
 	if err := router.Run(cfg.Server.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}

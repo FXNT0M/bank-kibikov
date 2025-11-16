@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Банк Кибиков</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- БЛОК 1: АВТОРИЗАЦИЯ -->
+        <div id="auth-section" class="section active">
+            <div class="auth-container">
+                <h1>🏦 Банк Кибиков</h1>
+                
+                <div class="auth-tabs">
+                    <button class="tab-btn active" onclick="showTab('login')">Вход</button>
+                    <button class="tab-btn" onclick="showTab('register')">Регистрация</button>
+                </div>
+                
+                <!-- Форма входа -->
+                <div id="login-tab" class="tab-content active">
+                    <input type="text" id="login-cipher" placeholder="Ваш шифр" class="input-field">
+                    <input type="password" id="login-password" placeholder="Пароль" class="input-field">
+                    <button onclick="login()" class="btn-primary">Войти в систему</button>
+                </div>
+                
+                <!-- Форма регистрации -->
+                <div id="register-tab" class="tab-content">
+                    <input type="text" id="reg-cipher" placeholder="Придумайте шифр" class="input-field">
+                    <input type="password" id="reg-password" placeholder="Придумайте пароль" class="input-field">
+                    <input type="text" id="reg-name" placeholder="Ваше имя" class="input-field">
+                    <select id="reg-group" class="input-field">
+                        <option value="">Выберите группу</option>
+                        <option value="кксо-07-23">ККСО-07-23</option>
+                        <option value="кксо-06-23">ККСО-06-23</option>
+                    </select>
+                    <button onclick="register()" class="btn-primary">Зарегистрироваться</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- БЛОК 2: ГЛАВНОЕ МЕНЮ -->
+        <div id="main-section" class="section">
+            <header class="app-header">
+                <h2>🏦 Банк Кибиков</h2>
+                <div class="user-info">
+                    <span id="user-name"></span>
+                    <button onclick="logout()" class="btn-secondary">Выйти</button>
+                </div>
+            </header>
+
+            <nav class="main-nav">
+                <button class="nav-btn active" onclick="showMainTab('dashboard')"> Обзор</button>
+                <button class="nav-btn" onclick="showMainTab('transfer')"> Перевод</button>
+                <button class="nav-btn" onclick="showMainTab('tasks')"> Задания</button>
+            </nav>
+
+            <!-- Панель обзора -->
+            <div id="dashboard-tab" class="main-tab active">
+                <div class="balance-card">
+                    <h3>Ваш баланс</h3>
+                    <div class="balance-amount" id="balance-amount">0 Кибиков</div>
+                </div>
+
+                <div class="recent-transactions">
+                    <h3>Последние операции</h3>
+                    <div id="transactions-list" class="transactions-list">
+                        <div class="transaction-item">
+                            <div class="transaction-info">
+                                <div class="transaction-name">Система</div>
+                                <div class="transaction-date">Стартовый бонус</div>
+                            </div>
+                            <div class="transaction-amount positive">+1000 К</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Панель перевода -->
+            <div id="transfer-tab" class="main-tab">
+                <div class="transfer-form">
+                    <h3>💸 Перевод Кибиков</h3>
+                    <div class="form-content">
+                        <select id="transfer-group" class="input-field" onchange="filterRecipients()">
+                            <option value="">Все группы</option>
+                            <option value="кксо-07-23">ККСО-07-23</option>
+                            <option value="кксо-06-23">ККСО-06-23</option>
+                        </select>
+                        
+                        <select id="transfer-recipient" class="input-field">
+                            <option value="">Выберите получателя</option>
+                        </select>
+                        
+                        <input type="number" id="transfer-amount" placeholder="Сумма перевода" class="input-field">
+                        <button onclick="makeTransfer()" class="btn-primary">Выполнить перевод</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Панель заданий -->
+            <div id="tasks-tab" class="main-tab">
+                <div class="tasks-list">
+                    <h3>🎯 Задания для получения Кибиков</h3>
+                    <div id="tasks-container" class="tasks-container">
+                        <!-- Задания будут загружены через JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/renderer.js"></script>
+</body>
+</html>
